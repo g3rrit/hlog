@@ -1,0 +1,7 @@
+lol( X, sdf).
+
+
+rule(Y, lol) :-
+        tets(x),
+        lsdf(Y),
+        sdf(G, gsd, G).
