@@ -1,4 +1,5 @@
-import Text.ParserCombinators.Parsec
+import Text.Parsec
+import Text.ParserCombinators.Parsec hiding (try)
 import Control.Monad.State
 import Control.Monad.Except
 
@@ -54,24 +55,19 @@ parseRule = do
   char '.'
   return $ Rule s xs
 
-parseExp = many (parseFact <|> parseRule)
+parseExp :: ParsecT [Char] Context IO [Exp]
+parseExp = many (try parseFact <|> try parseRule)
 
-parseFile :: String -> String -> HlogResult
-parseFile fname source =
-  case (parse parseExp fname source) of
-    Right x -> return x
-    Left e -> throwError $ show e
-
-
-repl = do
+main = do
   let fpath = "test.txt"
-  liftIO $ putStrLn "----- Hlog ------"
-  source <- liftIO $ readFile fpath
-  liftIO $ putStrLn $ "Parsing Source:\n" ++ source
-  liftIO $ putStrLn $ "---------------"
-  t <- parseFile fpath (filter (`notElem` ignoreList) source)
-  liftIO $ putStrLn $ show t
+  putStrLn "----- Hlog ------"
+  source <- readFile fpath
+  putStrLn $ "Parsing Source:\n" ++ source
+  putStrLn "---------------"
 
+  r <- runParserT parseExp initialCtx "" (filter (`notElem` ignoreList) source)
+  case r of
+    Left e -> putStrLn $ "Error: " ++ (show e)
+    Right v -> putStrLn $ show v
 
-main = case (runExceptT (evalStateT repl initialCtx)) of
-         Left
+  return ()
