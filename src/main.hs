@@ -2,6 +2,8 @@ import Text.Parsec
 import Text.ParserCombinators.Parsec hiding (try)
 import Control.Monad.State
 import Control.Monad.Except
+import Data.Char
+import Data.MultiMap
 
 data Context = Context String
 
@@ -16,6 +18,36 @@ data Exp = Fact Atom
          | Rule Atom [Atom]
          | Assertion [Atom]
          deriving Show
+
+type Sub = String -> Maybe String
+
+type Env = Data.MultiMap String Exp
+
+
+--------------------------------------------------------
+-- UTIL
+--------------------------------------------------------
+
+isVar :: String -> Bool
+isVar (x:_) = Data.Char.isUpper x
+
+isSym :: String -> Bool
+isSym x = not $ isVar x
+
+vars :: [String] -> [String]
+vars s = filter isVar s
+
+syms :: [String] -> [String]
+syms s = filter isSym s
+
+concatSub :: Sub -> Sub -> Sub
+concatSub s0 s1 = \s -> case s0 s of
+                          Just r -> Just r
+                          Nothing -> s0 s
+
+--------------------------------------------------------
+-- PARSER
+--------------------------------------------------------
 
 type VarName = String
 type SymName = String
@@ -57,6 +89,33 @@ parseRule = do
 
 parseExp :: ParsecT [Char] Context IO [Exp]
 parseExp = many (try parseFact <|> try parseRule)
+
+--------------------------------------------------------
+-- RESOLVER
+--------------------------------------------------------
+
+applySub :: Sub -> [Atom] -> [Atom]
+applySub s al = map (applySub' s) al
+  where applySub' s a = undefined
+
+
+resolveAtoms :: [Atom] -> Maybe Sub
+resolveAtoms l = resolveExps' l 0
+  where resolveAtoms' l@(e:exs) i = do
+          s0 <- resolveAtom e i
+          let exs' = applySub s0 exs
+          case resolveAtoms exs' of
+            Just s1 -> return $ concatSub s0 s1
+            Nothing -> resolveAtoms' l (i + 1)
+
+resolveAtom :: Atom -> Int -> Maybe Sub
+resolveAtom a i =
+  where exps = lookup
+
+
+--------------------------------------------------------
+-- MAIN
+--------------------------------------------------------
 
 main = do
   let fpath = "test.txt"
