@@ -16,7 +16,6 @@ data Atom = Atom String [String]
 
 data Exp = Fact Atom
          | Rule Atom [Atom]
-         | Assertion [Atom]
          deriving Show
 
 type Sub = String -> Maybe String
@@ -27,6 +26,10 @@ type Env = Data.MultiMap String Exp
 --------------------------------------------------------
 -- UTIL
 --------------------------------------------------------
+
+name :: Exp -> String
+name Fact (Atom n _) = n
+name Rule (Atom n _) _ = n
 
 isVar :: String -> Bool
 isVar (x:_) = Data.Char.isUpper x
@@ -44,6 +47,26 @@ concatSub :: Sub -> Sub -> Sub
 concatSub s0 s1 = \s -> case s0 s of
                           Just r -> Just r
                           Nothing -> s0 s
+
+createSub :: String -> String -> Maybe Sub
+createSub s0 s1
+  | isSym s0 && isSym s1 = Nothing
+  | isSym s0 && isVar s1 = \s -> if s == s1 then Just s0 else Nothing
+  | isVar s0 && isSym s1 = \s -> if s == s0 then Just s1 else Nothing
+  | isVar s0 && isSym s1 = \s -> if s == s0
+                                 then Just s1
+                                 else if s == s1
+                                      then Just s0
+                                      else Nothing
+
+createSubs :: [String] -> [String] -> Maybe Sub
+createSubs [] [] = \s -> Nothing
+createSubs _ []  = Nothing
+createSubs [] _  = Nothing
+createSubs (s0:s0') (s1:s1') = do
+  su0 <- createSub s0 s1
+  return $ concatSub sub0 $ createSubs s0' s1'
+
 
 --------------------------------------------------------
 -- PARSER
@@ -99,19 +122,29 @@ applySub s al = map (applySub' s) al
   where applySub' s a = undefined
 
 
-resolveAtoms :: [Atom] -> Maybe Sub
-resolveAtoms l = resolveExps' l 0
-  where resolveAtoms' l@(e:exs) i = do
+resolveAtoms :: Env -> [Atom] -> Maybe Sub
+resolveAtoms e l = resolveExps' l 0
+  where resolveAtoms' e l@(e:exs) i = do
           s0 <- resolveAtom e i
           let exs' = applySub s0 exs
           case resolveAtoms exs' of
             Just s1 -> return $ concatSub s0 s1
             Nothing -> resolveAtoms' l (i + 1)
 
-resolveAtom :: Atom -> Int -> Maybe Sub
-resolveAtom a i =
-  where exps = lookup
+resolveAtom :: Env -> Atom -> Int -> Maybe Sub
+resolveAtom env a i = matchExp a exps i
+  where exps = lookup (name a) env
 
+matchExps :: Atom -> [Exps] -> Int -> Maybe Sub
+matchExps _ [] _ = Nothing
+matchExps a (e:es) i =
+  case matchExp a e of
+    Just r -> if i >= 0 then matchExps a es (i - 1) else Just r
+    Nothing -> matchExps a es i
+
+matchExp :: Atom -> Exp -> Maybe Sub
+matchExp (Atom s ss) (Fact (Atom s' ss')) = createSubs ss ss'
+matchExp (Atom s ss) (Rule (Atom s' ss') as) = undefined
 
 --------------------------------------------------------
 -- MAIN
