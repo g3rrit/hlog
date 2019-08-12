@@ -1,4 +1,6 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleInstances #-}
+
 import Text.Parsec
 import Text.ParserCombinators.Parsec hiding (try)
 import Control.Monad.State
@@ -8,10 +10,6 @@ import qualified Data.MultiMap as MultiMap
 import qualified Data.Map as Map
 import qualified Test.LeanCheck as Lc
 
-data Context = Context String
-
-initialCtx = Context "test"
-
 type HlogError = ExceptT String IO
 
 data Atom = Atom String [String]
@@ -19,55 +17,35 @@ data Atom = Atom String [String]
 
 data Exp = Fact Atom
          | Rule Atom [Atom]
+         | Assertion
          deriving Show
 
 type Sub = Map.Map String String
 
 type Env = MultiMap.MultiMap String Exp
 
+initialEnv = MultiMap.empty
+
 --------------------------------------------------------
 -- TEST
 --------------------------------------------------------
 
-instance (Show a, Show b) => Show (MultiMap.MultiMap a b) where
-  show e = show $ MultiMap.elems e
+--------------------------------------------------------
+-- ENVIRONMENT
+--------------------------------------------------------
 
+envAdd :: Exp -> Env -> Env
+envAdd ex env = MultiMap.insert n ex env
+  where n = name ex
 
-newtype TestEnv = TestEnv Env
-instance Lc.Listable TestEnv where
-  tiers = [map (\(a', b') -> TestEnv $ MultiMap.fromList $ zip a' b')
-           $ zip (Lc.tiers :: [[String]]) (Lc.tiers :: [[Exp]])]
-
-testEnv = MultiMap.fromList [("f0", Fact (Atom "f0" ["b", "a"])),
-                             ("f1", Fact (Atom "f0" ["c", "c"])),
-                             ("f2", Fact (Atom "f2" ["a", "b"])),
-                             ("r0", Rule (Atom "r0" ["X", "Y"]) [
-                                 (Atom "f0" ["Y", "X"]),
-                                 (Atom "f1" ["c", "c"]) ]),
-                             ("r1", Rule (Atom "r1" ["c", "X"]) [
-                                 (Atom "f0" ["X", "a"]) ]) ]
-
-
-testAtoms = [Atom "f0" ["X", "a"], Atom "r0" ["X", "b"], Atom "r1" ["Y", "b"]]
-
-testAtom = (Atom "r1" ["X", "Y"])
-testRule = (Rule (Atom "r1" ["c", "X"]) [Atom "f0" ["X", "a"]])
-
-
-atomFromEnv :: Env -> Int -> Int -> Atom
-atomFromEnv e i n = case el !! n' of
-                      Fact a -> a
-                      Rule a as -> a
-  where els = MultiMap.elems e
-        i' = i `mod` (length els)
-        el = els !! i'
-        n' = n `mod` (length el)
-
-testResolveAtoms e i n c = case resolveAtoms e (as n) of
-                           Just r -> True
-                           _ -> False
-  where as 0 = []
-        as n' = (atomFromEnv e (i + n') c) : as (n' - 1)
+expArgs :: String -> Env -> Maybe Int
+expArgs s env = case exps of
+                  [] -> Nothing
+                  (x:_) -> case x of
+                             Fact (Atom s ss) -> Just $ length ss
+                             Rule (Atom s ss) _ -> Just $ length ss
+  where exps = MultiMap.lookup s env
+        l = length exps
 
 --------------------------------------------------------
 -- UTIL
@@ -121,13 +99,13 @@ createSubs s0 s1 = foldr csub (Just emptySub) $ zip s0 s1
 
 
 markVar :: Atom -> Atom
-markVar (Atom s ss) = Atom s (map (\x -> if isVar x then '_':x else x) ss)
+markVar (Atom s ss) = Atom s (map (\x -> if (isVar x) && ((head x) /= '_')then '_':x else x) ss)
 
 filterMarkedSub :: Sub -> Sub
-filterMarkedSub s =  Map.map (\(x:xs) -> xs) fs
-  where fs = Map.filter (\a -> case a of
-                                 '_':xs -> True
-                                 _      -> False) s
+filterMarkedSub s =  Map.mapKeys (\(x:xs)-> xs) fs
+  where fs = Map.filterWithKey (\k v -> case k of
+                                          '_':xs -> True
+                                          _      -> False) s
 
 --------------------------------------------------------
 -- PARSER
@@ -136,19 +114,20 @@ filterMarkedSub s =  Map.map (\(x:xs) -> xs) fs
 type VarName = String
 type SymName = String
 
-type HlogResult = StateT Context HlogError [Exp]
+type HlogResult = StateT Env HlogError [Exp]
 
 ignoreList = [ '\n', '\r', '\t', ' ']
 
 parseVar = do
   x <- upper
-  xs <- many letter
+  xs <- many alphaNum
   return $ x:xs
 
-parseSymbol = do
-  x <- lower
-  xs <- many letter
-  return $ x:xs
+parseSymbol = (try parseSymbol' <|> many alphaNum)
+  where parseSymbol' = do
+          x <- lower
+          xs <- many alphaNum
+          return $ x:xs
 
 parseName = parseSymbol <|> parseVar
 
@@ -157,22 +136,42 @@ parseAtom = do
   char '('
   xs <- sepBy parseName (char ',')
   char ')'
-  return $ Atom s xs
+  let r = Atom s xs
+  env <- getState
+  let mc = expArgs s env
+  case mc of
+    Nothing -> return r
+    Just c  -> if c == length xs
+               then return r
+               else unexpected $ "Invalid Number of Arguments for: " ++ (show r)
 
 parseFact = do
   a <- parseAtom
   char '.'
-  return $ Fact a
+  let r = Fact a
+  modifyState $ envAdd r
+  return r
 
 parseRule = do
   s <- parseAtom
   string ":-"
   xs <- sepBy parseAtom (char ',')
   char '.'
-  return $ Rule s xs
+  let r = Rule s xs
+  modifyState $ envAdd r
+  return r
 
-parseExp :: ParsecT [Char] Context IO [Exp]
-parseExp = many (try parseFact <|> try parseRule)
+parseAssertion = do
+  string ":-"
+  xs <- sepBy parseAtom (char ',')
+  char '.'
+  env <- getState
+  let r = resolveAtoms env xs
+  liftIO $ putStrLn $ show r
+  return Assertion
+
+parseExp :: ParsecT [Char] Env IO [Exp]
+parseExp = many (try parseFact <|> try parseRule <|> parseAssertion)
 
 --------------------------------------------------------
 -- RESOLVER
@@ -182,12 +181,13 @@ applySubs :: Sub -> [Atom] -> [Atom]
 applySubs s al = map (applySub s) al
 
 applySub :: Sub -> Atom -> Atom
-applySub s (Atom n ss) = Atom n (map (\a -> case sub s a of
-                                              Just r  -> r
-                                              Nothing -> a) ss)
-
+applySub s (Atom n ss) =
+  Atom n (map (\a -> case sub s a of
+                       Just r  -> r
+                       Nothing -> a) ss)
 
 resolveAtoms :: Env -> [Atom] -> Maybe Sub
+resolveAtoms e [] = Just emptySub
 resolveAtoms e l = resolveAtoms' e l 0
   where resolveAtoms' env l@(e:exs) i = do
           s0 <- resolveAtom env e i
@@ -204,7 +204,9 @@ matchExps :: Env -> Atom -> [Exp] -> Int -> Maybe Sub
 matchExps _ _ [] _ = Nothing
 matchExps env a (e:es) i =
   case matchExp env a' e of
-    Just r -> if i >= 0 then matchExps env a' es (i - 1) else Just $ filterMarkedSub r
+    Just r -> if i > 0
+              then matchExps env a' es (i - 1)
+              else Just $ filterMarkedSub r
     Nothing -> matchExps env a' es i
   where a' = markVar a
 
@@ -228,7 +230,7 @@ main = do
   putStrLn $ "Parsing Source:\n" ++ source
   putStrLn "---------------"
 
-  r <- runParserT parseExp initialCtx "" (filter (`notElem` ignoreList) source)
+  r <- runParserT parseExp initialEnv "" (filter (`notElem` ignoreList) source)
   case r of
     Left e -> putStrLn $ "Error: " ++ (show e)
     Right v -> putStrLn $ show v
