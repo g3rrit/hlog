@@ -12,38 +12,144 @@ import qualified Test.LeanCheck as Lc
 
 type HlogError = ExceptT String IO
 
-data Atom = Atom String [String]
-  deriving Show
+type Atom = (String, [Term])
 
 data Exp = Fact Atom
          | Rule Atom [Atom]
          | Assertion
          deriving Show
 
-type Sub = Map.Map String String
+type Sub = Map.Map String Term
 
 type Env = MultiMap.MultiMap String Exp
 
-initialEnv = MultiMap.empty
+type Term = Var String
+          | Fn String [Term]
+          deriving Show
+
 
 --------------------------------------------------------
--- TEST
+-- TERM
 --------------------------------------------------------
+
+termArity :: Term -> Int
+termArity Fn _ xs = length xs
+termArity _ = 0
+
+termVars :: Term -> [String]
+termVars Var x = [x]
+termVars Fn _ xs = vars xs
+
+compareArity :: Term -> Term -> Bool
+compareArity t0 t1 = (termArity t0) == (termArity t1)
+
+unify :: Term -> Term -> Maybe Sub
+unfiy (Var x) t1@(Var _) = Just $ Map.singleton x t1
+unfiy (Var x) t1 = if elem x (termVars t1)
+                   then Nothing
+                   else Just $ Map.singleton x t1
+unify t0 t1@(Var _) = unify t1 t0
+unify (Fn n xs) (Fn p ys) = if n /= p
+                            then Nothing
+                            else unifyTerms xs ys
+
+unifyTerms :: [Term] -> [Term] -> Maybe Sub
+unifyTerms xs ys = unifyTerms xs ys emptySub
+
+unifyTerms' [] [] s = s
+unifyTerms' xs ys s =
+  if not ln
+  then Nothing
+  else let (x:xs', y:ys') = (xs, ys) in do
+    s <- unify x y
+    let xs'' = subTerms s xs'
+    let ys'' = subTerms s ys'
+    unifyTerms xs'' ys'' s
+  where ln = (length xs) == (length ys)
+
+
+--------------------------------------------------------
+-- Substitution
+--------------------------------------------------------
+
+sub :: Sub -> String -> Maybe Term
+sub su s = Map.lookup s su
+
+emptySub :: Sub
+emptySub = Map.empty
+
+-- concatSub :: Sub -> Sub -> Maybe Sub
+-- concatSub s0 s1 = if not ins
+--                   then Nothing
+--                   else Just $ Map.union s0 s1
+--   where ins = foldr (&&) True $ Map.intersectionWith (==) s0 s1
+
+subTerm :: Sub -> Term -> Term
+subTerm s t =
+  case t of
+    Var x -> let mt = sub x
+             in case mt of
+                  Just t' -> t
+                  Nothing -> Var x
+    Fn x xs -> Fn x (map (subTerm s) xs)
+
+subTerms :: Sub -> [Term] -> [Term]
+subTerms s ts = map (sub s) ts
+
+-- concatSub :: Sub -> Sub -> Maybe Sub
+-- concatSub s0 s1 = do
+--   ms <- maybeSubs subs
+--   return $ Map.map (\v -> foldr (\a b -> subTerm a b) v ms) sn
+--   where mf s = \v -> subTerm s v
+--         s0' = Map.map (mf s1) s0
+--         s1' = Map.map (mf s0) s1
+--         t0s = Map.elems $ Map.intersection s0' s1'
+--         t1s = Map.elems $ Map.insersection s1' s0'
+--         keys =  Map.keys $ Map.intersection s0' s1'
+--         sn = Map.union s0' s1'
+--         subs = zipWith (\a b -> unify a b) t0s t1s
+
+-- maybeSubs :: [Maybe Sub] -> Maybe [Sub]
+-- maybeSubs [] = Just []
+-- maybeSubs (Nothing:_) = Nothing
+-- maybeSubs ((Just x):xs) = do
+--   ms <- maybeSubs xs
+--   return $ x:ms
+
+
+-- createSub :: String -> String -> Maybe Sub
+-- createSub s0 s1
+--   | isSym s0 && isSym s1 = if s0 == s1 then Just $ emptySub else Nothing
+--   | isSym s0 && isVar s1 = Just $ Map.singleton s1 s0
+--   | isVar s0 && isSym s1 = Just $ Map.singleton s0 s1
+--   | isVar s0 && isVar s1 = Just $ emptySub
+
+-- createSubs :: [String] -> [String] -> Maybe Sub
+-- createSubs [] [] = Just emptySub
+-- createSubs _ []  = Nothing
+-- createSubs [] _  = Nothing
+-- createSubs s0 s1 = foldr csub (Just emptySub) $ zip s0 s1
+--   where csub (s0', s1') c = do
+--           ns <- createSub s0' s1'
+--           c' <- c
+--           concatSub ns c'
 
 --------------------------------------------------------
 -- ENVIRONMENT
 --------------------------------------------------------
 
+initialEnv = MultiMap.empty
+
 envAdd :: Exp -> Env -> Env
 envAdd ex env = MultiMap.insert n ex env
   where n = name ex
 
-expArgs :: String -> Env -> Maybe Int
-expArgs s env = case exps of
+expArity :: String -> Env -> Maybe Int
+expArity s env = case exps of
                   [] -> Nothing
                   (x:_) -> case x of
-                             Fact (Atom s ss) -> Just $ length ss
-                             Rule (Atom s ss) _ -> Just $ length ss
+                             Fact (s, ss) -> Just $ length ss
+                             Rule (s, ss) _ -> Just $ length ss
   where exps = MultiMap.lookup s env
         l = length exps
 
@@ -52,8 +158,8 @@ expArgs s env = case exps of
 --------------------------------------------------------
 
 name :: Exp -> String
-name (Fact (Atom n _)) = n
-name (Rule (Atom n _) _) = n
+name (Fact (n, _)) = n
+name (Rule (n, _) _) = n
 
 isVar :: String -> Bool
 isVar (x:_) = Data.Char.isUpper x || x == '_'
@@ -67,39 +173,8 @@ vars s = filter isVar s
 syms :: [String] -> [String]
 syms s = filter isSym s
 
-sub :: Sub -> String -> Maybe String
-sub su s = Map.lookup s su
-
-emptySub :: Sub
-emptySub = Map.empty
-
-concatSub :: Sub -> Sub -> Maybe Sub
-concatSub s0 s1 = if not ins
-                  then Nothing
-                  else Just $ Map.union s0 s1
-  where ins = foldr (&&) True $ Map.intersectionWith (==) s0 s1
-
-
-createSub :: String -> String -> Maybe Sub
-createSub s0 s1
-  | isSym s0 && isSym s1 = if s0 == s1 then Just $ emptySub else Nothing
-  | isSym s0 && isVar s1 = Just $ Map.singleton s1 s0
-  | isVar s0 && isSym s1 = Just $ Map.singleton s0 s1
-  | isVar s0 && isVar s1 = Just $ emptySub
-
-createSubs :: [String] -> [String] -> Maybe Sub
-createSubs [] [] = Just emptySub
-createSubs _ []  = Nothing
-createSubs [] _  = Nothing
-createSubs s0 s1 = foldr csub (Just emptySub) $ zip s0 s1
-  where csub (s0', s1') c = do
-          ns <- createSub s0' s1'
-          c' <- c
-          concatSub ns c'
-
-
 markVar :: Atom -> Atom
-markVar (Atom s ss) = Atom s (map (\x -> if (isVar x) && ((head x) /= '_')then '_':x else x) ss)
+markVar (s, ss) = (s, (map (\x -> if (isVar x) && ((head x) /= '_')then '_':x else x) ss))
 
 filterMarkedSub :: Sub -> Sub
 filterMarkedSub s =  Map.mapKeys (\(x:xs)-> xs) fs
@@ -118,27 +193,36 @@ type HlogResult = StateT Env HlogError [Exp]
 
 ignoreList = [ '\n', '\r', '\t', ' ']
 
-parseVar = do
-  x <- upper
-  xs <- many alphaNum
-  return $ x:xs
-
 parseSymbol = (try parseSymbol' <|> many alphaNum)
   where parseSymbol' = do
           x <- lower
           xs <- many alphaNum
           return $ x:xs
 
-parseName = parseSymbol <|> parseVar
+parseVar = do
+  x <- upper
+  xs <- many alphaNum
+  let r = Var (x:xs)
+  return r
+
+parseFn = do
+  s <- parseSymbol
+  char '('
+  xs <- sepBy parseTerm (char ',')
+  char ')'
+  let r = Fn s xs
+  return r
+
+parseTerm = (try parseVar <|> parseFn)
 
 parseAtom = do
   s <- parseSymbol
   char '('
-  xs <- sepBy parseName (char ',')
+  xs <- sepBy parseTerm (char ',')
   char ')'
-  let r = Atom s xs
+  let r = (s, xs)
   env <- getState
-  let mc = expArgs s env
+  let mc = expArity s env
   case mc of
     Nothing -> return r
     Just c  -> if c == length xs
@@ -177,27 +261,25 @@ parseExp = many (try parseFact <|> try parseRule <|> parseAssertion)
 -- RESOLVER
 --------------------------------------------------------
 
-applySubs :: Sub -> [Atom] -> [Atom]
-applySubs s al = map (applySub s) al
+subAtoms :: Sub -> [Atom] -> [Atom]
+subAtoms s al = map (applySub s) al
 
-applySub :: Sub -> Atom -> Atom
-applySub s (Atom n ss) =
-  Atom n (map (\a -> case sub s a of
-                       Just r  -> r
-                       Nothing -> a) ss)
+subAtom :: Sub -> Atom -> Atom
+subAtom s (n, ss) =
+  (n, subTerms s ss)
 
 resolveAtoms :: Env -> [Atom] -> Maybe Sub
 resolveAtoms e [] = Just emptySub
 resolveAtoms e l = resolveAtoms' e l 0
   where resolveAtoms' env l@(e:exs) i = do
           s0 <- resolveAtom env e i
-          let exs' = applySubs s0 exs
+          let exs' = subAtoms s0 exs
           case resolveAtoms env exs' of
-            Just s1 -> concatSub s0 s1
+            Just s1 -> Map.union s0 s1
             Nothing -> resolveAtoms' env l (i + 1)
 
 resolveAtom :: Env -> Atom -> Int -> Maybe Sub
-resolveAtom env a@(Atom n _) i = matchExps env a exps i
+resolveAtom env a@(n, _) i = matchExps env a exps i
   where exps = MultiMap.lookup n env
 
 matchExps :: Env -> Atom -> [Exp] -> Int -> Maybe Sub
@@ -211,12 +293,12 @@ matchExps env a (e:es) i =
   where a' = markVar a
 
 matchExp :: Env -> Atom -> Exp -> Maybe Sub
-matchExp env (Atom s ss) (Fact (Atom s' ss')) = createSubs ss ss'
-matchExp env (Atom s ss) (Rule head@(Atom s' ss') as) = do
-  mhs <- createSubs ss ss'
-  let sa = applySubs mhs as
+matchExp env (s, ss) (Fact (s', ss')) = unifyTerms ss ss'
+matchExp env (s, ss) (Rule head@(s', ss') as) = do
+  mhs <- unifyTerms ss ss'
+  let sa = subAtoms mhs as
   rs <- resolveAtoms env sa
-  let (Atom s'' ss'') = applySub rs head
+  let (s'', ss'') = subAtom rs head
   createSubs ss ss''
 
 --------------------------------------------------------
