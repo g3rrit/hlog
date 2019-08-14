@@ -23,7 +23,7 @@ type Sub = Map.Map String Term
 
 type Env = MultiMap.MultiMap String Exp
 
-type Term = Var String
+data Term = Var String
           | Fn String [Term]
           deriving Show
 
@@ -33,12 +33,12 @@ type Term = Var String
 --------------------------------------------------------
 
 termArity :: Term -> Int
-termArity Fn _ xs = length xs
+termArity (Fn _ xs) = length xs
 termArity _ = 0
 
 termVars :: Term -> [String]
-termVars Var x = [x]
-termVars Fn _ xs = vars xs
+termVars (Var x) = [x]
+termVars (Fn _ xs) = xs >>= termVars
 
 compareArity :: Term -> Term -> Bool
 compareArity t0 t1 = (termArity t0) == (termArity t1)
@@ -54,9 +54,9 @@ unify (Fn n xs) (Fn p ys) = if n /= p
                             else unifyTerms xs ys
 
 unifyTerms :: [Term] -> [Term] -> Maybe Sub
-unifyTerms xs ys = unifyTerms xs ys emptySub
+unifyTerms xs ys = unifyTerms' xs ys emptySub
 
-unifyTerms' [] [] s = s
+unifyTerms' [] [] s = Just s
 unifyTerms' xs ys s =
   if not ln
   then Nothing
@@ -64,9 +64,21 @@ unifyTerms' xs ys s =
     s <- unify x y
     let xs'' = subTerms s xs'
     let ys'' = subTerms s ys'
-    unifyTerms xs'' ys'' s
+    s' <- unifyTerms xs'' ys''
+    return $ Map.union s s'
   where ln = (length xs) == (length ys)
 
+markTerm :: Term -> Term
+markTerm (Var n@(x:xs)) = if x == '_'
+                          then Var n
+                          else Var ('_':n)
+markTerm (Fn n xs) = Fn n $ map markTerm xs
+
+unmarkTerm :: Term -> Term
+unmakrTerm (Var n@(x:xs)) = if x == '_'
+                            then Var xs
+                            else Var n
+unmarkTerm (Fn n xs) = Fn n $ map unmarkTerm xs
 
 --------------------------------------------------------
 -- Substitution
@@ -87,14 +99,14 @@ emptySub = Map.empty
 subTerm :: Sub -> Term -> Term
 subTerm s t =
   case t of
-    Var x -> let mt = sub x
+    Var x -> let mt = sub s x
              in case mt of
                   Just t' -> t
                   Nothing -> Var x
     Fn x xs -> Fn x (map (subTerm s) xs)
 
 subTerms :: Sub -> [Term] -> [Term]
-subTerms s ts = map (sub s) ts
+subTerms s ts = map (subTerm s) ts
 
 -- concatSub :: Sub -> Sub -> Maybe Sub
 -- concatSub s0 s1 = do
@@ -173,11 +185,11 @@ vars s = filter isVar s
 syms :: [String] -> [String]
 syms s = filter isSym s
 
-markVar :: Atom -> Atom
-markVar (s, ss) = (s, (map (\x -> if (isVar x) && ((head x) /= '_')then '_':x else x) ss))
+markAtom :: Atom -> Atom
+markAtom (s, ts) = (s, map markTerm ts)
 
 filterMarkedSub :: Sub -> Sub
-filterMarkedSub s =  Map.mapKeys (\(x:xs)-> xs) fs
+filterMarkedSub s = Map.map unmarkTerm $ Map.mapKeys (\(x:xs)-> xs) fs
   where fs = Map.filterWithKey (\k v -> case k of
                                           '_':xs -> True
                                           _      -> False) s
@@ -262,7 +274,7 @@ parseExp = many (try parseFact <|> try parseRule <|> parseAssertion)
 --------------------------------------------------------
 
 subAtoms :: Sub -> [Atom] -> [Atom]
-subAtoms s al = map (applySub s) al
+subAtoms s al = map (subAtom s) al
 
 subAtom :: Sub -> Atom -> Atom
 subAtom s (n, ss) =
@@ -275,7 +287,7 @@ resolveAtoms e l = resolveAtoms' e l 0
           s0 <- resolveAtom env e i
           let exs' = subAtoms s0 exs
           case resolveAtoms env exs' of
-            Just s1 -> Map.union s0 s1
+            Just s1 -> return $ Map.union s0 s1
             Nothing -> resolveAtoms' env l (i + 1)
 
 resolveAtom :: Env -> Atom -> Int -> Maybe Sub
@@ -290,7 +302,7 @@ matchExps env a (e:es) i =
               then matchExps env a' es (i - 1)
               else Just $ filterMarkedSub r
     Nothing -> matchExps env a' es i
-  where a' = markVar a
+  where a' = markAtom a
 
 matchExp :: Env -> Atom -> Exp -> Maybe Sub
 matchExp env (s, ss) (Fact (s', ss')) = unifyTerms ss ss'
@@ -299,7 +311,7 @@ matchExp env (s, ss) (Rule head@(s', ss') as) = do
   let sa = subAtoms mhs as
   rs <- resolveAtoms env sa
   let (s'', ss'') = subAtom rs head
-  createSubs ss ss''
+  unifyTerms ss ss''
 
 --------------------------------------------------------
 -- MAIN
