@@ -27,6 +27,19 @@ data Term = Var String
           | Fn String [Term]
           deriving Show
 
+--------------------------------------------------------
+-- TEST
+--------------------------------------------------------
+
+instance Lc.Listable Term where
+  tiers = Lc.cons1 Var
+          Lc.\/ Lc.cons2 Fn
+
+unifyTest :: Term -> Term -> Bool
+unifyTest t0 t1 = case unify t0 t1 of
+                    Just r -> True
+                    Nothing -> True
+
 
 --------------------------------------------------------
 -- TERM
@@ -44,8 +57,8 @@ compareArity :: Term -> Term -> Bool
 compareArity t0 t1 = (termArity t0) == (termArity t1)
 
 unify :: Term -> Term -> Maybe Sub
-unfiy (Var x) t1@(Var _) = Just $ Map.singleton x t1
-unfiy (Var x) t1 = if elem x (termVars t1)
+unify (Var x) t1@(Var _) = Just $ Map.singleton x t1
+unify (Var x) t1 = if elem x (termVars t1)
                    then Nothing
                    else Just $ Map.singleton x t1
 unify t0 t1@(Var _) = unify t1 t0
@@ -75,7 +88,7 @@ markTerm (Var n@(x:xs)) = if x == '_'
 markTerm (Fn n xs) = Fn n $ map markTerm xs
 
 unmarkTerm :: Term -> Term
-unmakrTerm (Var n@(x:xs)) = if x == '_'
+unmarkTerm (Var n@(x:xs)) = if x == '_'
                             then Var xs
                             else Var n
 unmarkTerm (Fn n xs) = Fn n $ map unmarkTerm xs
@@ -90,61 +103,17 @@ sub su s = Map.lookup s su
 emptySub :: Sub
 emptySub = Map.empty
 
--- concatSub :: Sub -> Sub -> Maybe Sub
--- concatSub s0 s1 = if not ins
---                   then Nothing
---                   else Just $ Map.union s0 s1
---   where ins = foldr (&&) True $ Map.intersectionWith (==) s0 s1
-
 subTerm :: Sub -> Term -> Term
 subTerm s t =
   case t of
     Var x -> let mt = sub s x
              in case mt of
-                  Just t' -> t
+                  Just t' -> t'
                   Nothing -> Var x
     Fn x xs -> Fn x (map (subTerm s) xs)
 
 subTerms :: Sub -> [Term] -> [Term]
 subTerms s ts = map (subTerm s) ts
-
--- concatSub :: Sub -> Sub -> Maybe Sub
--- concatSub s0 s1 = do
---   ms <- maybeSubs subs
---   return $ Map.map (\v -> foldr (\a b -> subTerm a b) v ms) sn
---   where mf s = \v -> subTerm s v
---         s0' = Map.map (mf s1) s0
---         s1' = Map.map (mf s0) s1
---         t0s = Map.elems $ Map.intersection s0' s1'
---         t1s = Map.elems $ Map.insersection s1' s0'
---         keys =  Map.keys $ Map.intersection s0' s1'
---         sn = Map.union s0' s1'
---         subs = zipWith (\a b -> unify a b) t0s t1s
-
--- maybeSubs :: [Maybe Sub] -> Maybe [Sub]
--- maybeSubs [] = Just []
--- maybeSubs (Nothing:_) = Nothing
--- maybeSubs ((Just x):xs) = do
---   ms <- maybeSubs xs
---   return $ x:ms
-
-
--- createSub :: String -> String -> Maybe Sub
--- createSub s0 s1
---   | isSym s0 && isSym s1 = if s0 == s1 then Just $ emptySub else Nothing
---   | isSym s0 && isVar s1 = Just $ Map.singleton s1 s0
---   | isVar s0 && isSym s1 = Just $ Map.singleton s0 s1
---   | isVar s0 && isVar s1 = Just $ emptySub
-
--- createSubs :: [String] -> [String] -> Maybe Sub
--- createSubs [] [] = Just emptySub
--- createSubs _ []  = Nothing
--- createSubs [] _  = Nothing
--- createSubs s0 s1 = foldr csub (Just emptySub) $ zip s0 s1
---   where csub (s0', s1') c = do
---           ns <- createSub s0' s1'
---           c' <- c
---           concatSub ns c'
 
 --------------------------------------------------------
 -- ENVIRONMENT
@@ -225,7 +194,11 @@ parseFn = do
   let r = Fn s xs
   return r
 
-parseTerm = (try parseVar <|> parseFn)
+parseConstant = do
+  s <- parseSymbol
+  return  $ Fn s []
+
+parseTerm = (try parseVar <|> try parseFn <|> parseConstant)
 
 parseAtom = do
   s <- parseSymbol

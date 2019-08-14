@@ -1,21 +1,15 @@
-lol( X, sdf).
-lol(fadsf, a).
+sum(X, z, X).
+sum(X, s(Y), Z) :-
+       add(s(X), Y, Z).
+
+mult(X, z, z).
+mult(X, s(Y), Z) :-
+        mult(X, Y, W),
+        sum(W, X, Z).
+
+eq(z, z).
+eq(s(X), s(Y)) :-
+         eq(X, Y).
 
 
-rule(Y, lol) :-
-        tets(x),
-        lsdf(Y),
-        sdf(G, gsd, G).
-
-num(0).
-num(1).
-num(2).
-num(3).
-num(4).
-num(5).
-num(6).
-num(7).
-num(8).
-num(9).
-num(10).
-num(11).
+:- eq(s(s(s(z))), s(s(s(z)))).
