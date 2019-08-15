@@ -5,9 +5,10 @@ import Text.Parsec
 import Text.ParserCombinators.Parsec hiding (try)
 import Control.Monad.State
 import Control.Monad.Except
+import Data.List
 import Data.Char
 import qualified Data.MultiMap as MultiMap
-import qualified Data.Map as Map
+import qualified Data.Map as Map hiding (show)
 import qualified Test.LeanCheck as Lc
 
 type HlogError = ExceptT String IO
@@ -25,7 +26,24 @@ type Env = MultiMap.MultiMap String Exp
 
 data Term = Var String
           | Fn String [Term]
-          deriving Show
+
+--------------------------------------------------------
+-- SHOW
+--------------------------------------------------------
+
+instance Show Term where
+  show (Var x) = x
+  show (Fn n ts) = case l of
+                     [] -> n
+                     (x:xs) -> n ++ "(" ++ (concat (intersperse ", " l)) ++ ")"
+    where l = map show ts
+
+
+showSub :: Sub -> String
+showSub a = "{ " ++ l'' ++ " }"
+  where l = Map.toList a
+        l' = map (\(a, b) -> a ++ " -> " ++ (show b)) l
+        l'' = concat (intersperse ", " l')
 
 --------------------------------------------------------
 -- TEST
@@ -39,6 +57,9 @@ unifyTest :: Term -> Term -> Bool
 unifyTest t0 t1 = case unify t0 t1 of
                     Just r -> True
                     Nothing -> True
+
+-- testEnv = MultiMap.fromList [ ("sum", Fact ("sum", [Var "X", Fn "z" [], Var  "X"])),
+--                               ("sum", Rule ("sum", [Var "X",
 
 
 --------------------------------------------------------
@@ -236,7 +257,9 @@ parseAssertion = do
   char '.'
   env <- getState
   let r = resolveAtoms env xs
-  liftIO $ putStrLn $ show r
+  case r of
+    Just r' -> liftIO $ putStrLn $ showSub r'
+    Nothing -> liftIO $ putStrLn "No Substitution"
   return Assertion
 
 parseExp :: ParsecT [Char] Env IO [Exp]
@@ -300,6 +323,6 @@ main = do
   r <- runParserT parseExp initialEnv "" (filter (`notElem` ignoreList) source)
   case r of
     Left e -> putStrLn $ "Error: " ++ (show e)
-    Right v -> putStrLn $ show v
+    Right _ -> putStrLn "Done"
 
   return ()
