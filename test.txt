@@ -9,6 +9,7 @@ mul(X, s(Y), Z) :-
         mul(X, Y, W),
         sum(W, X, Z).
 
+pow(z, z, s(z)).
 pow(X, z, s(z)).
 pow(X, s(Y), Z) :-
        pow(X, Y, W),
@@ -19,6 +20,6 @@ eq(s(X), s(Y)) :-
          eq(X, Y).
 
 
-:- sum(s(s(z)), Y, s(s(s(z)))).
+:- mul(X, s(s(z)), s(s(s(s(z))))).
 
 # filtering should not filter subs when Value is Var

@@ -7,7 +7,6 @@ import Control.Monad.State
 import Control.Monad.Except
 import Data.List
 import Data.Char
-import qualified Data.MultiMap as MultiMap
 import qualified Data.Map as Map hiding (show)
 import qualified Test.LeanCheck as Lc
 
@@ -22,7 +21,7 @@ data Exp = Fact Atom
 
 type Sub = Map.Map String Term
 
-type Env = MultiMap.MultiMap String Exp
+type Env = Map.Map String [Exp]
 
 data Term = Var String
           | Fn String [Term]
@@ -137,20 +136,28 @@ subTerms :: Sub -> [Term] -> [Term]
 subTerms s ts = map (subTerm s) ts
 
 subConcat :: Sub -> Sub -> Sub
-subConcat s0 s1 = subConcat' (Map.union s0 s1) (Map.intersection s1 s0)
-  where subConcat' s i = if Map.null i
-                         then s
-                         else subConcat s (Map.mapKeys (++ "*") i)
+subConcat s0 s1 = if Map.null i
+                  then u
+                  else Map.map (subTerm i) u
+  where u = Map.union s0 s1
+        i = Map.intersection s1 s0
 
 --------------------------------------------------------
 -- ENVIRONMENT
 --------------------------------------------------------
 
-initialEnv = MultiMap.empty
+initialEnv = Map.empty
+
+envGet :: String -> Env -> [Exp]
+envGet n env = case Map.lookup n env of
+                 Just l -> l
+                 Nothing -> []
 
 envAdd :: Exp -> Env -> Env
-envAdd ex env = MultiMap.insert n ex env
+envAdd ex env = Map.insert n l' env
   where n = name ex
+        l = envGet n env
+        l' = l ++ [ex]
 
 expArity :: String -> Env -> Maybe Int
 expArity s env = case exps of
@@ -158,7 +165,7 @@ expArity s env = case exps of
                   (x:_) -> case x of
                              Fact (s, ss) -> Just $ length ss
                              Rule (s, ss) _ -> Just $ length ss
-  where exps = MultiMap.lookup s env
+  where exps = envGet s env
         l = length exps
 
 --------------------------------------------------------
@@ -300,7 +307,7 @@ resolveAtoms e l = resolveAtoms' e l 0
 
 resolveAtom :: Env -> Atom -> Int -> Maybe Sub
 resolveAtom env a@(n, _) i = matchExps env a exps i
-  where exps = MultiMap.lookup n env
+  where exps = envGet n env
 
 matchExps :: Env -> Atom -> [Exp] -> Int -> Maybe Sub
 matchExps _ _ [] _ = Nothing
