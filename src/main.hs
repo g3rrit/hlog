@@ -99,7 +99,7 @@ unifyTerms' xs ys s =
     let xs'' = subTerms s xs'
     let ys'' = subTerms s ys'
     s' <- unifyTerms xs'' ys''
-    return $ Map.union s s'
+    return $ subConcat s s'
   where ln = (length xs) == (length ys)
 
 markTerm :: Term -> Term
@@ -135,6 +135,12 @@ subTerm s t =
 
 subTerms :: Sub -> [Term] -> [Term]
 subTerms s ts = map (subTerm s) ts
+
+subConcat :: Sub -> Sub -> Sub
+subConcat s0 s1 = subConcat' (Map.union s0 s1) (Map.intersection s1 s0)
+  where subConcat' s i = if Map.null i
+                         then s
+                         else subConcat s (Map.mapKeys (++ "*") i)
 
 --------------------------------------------------------
 -- ENVIRONMENT
@@ -179,10 +185,16 @@ markAtom :: Atom -> Atom
 markAtom (s, ts) = (s, map markTerm ts)
 
 filterMarkedSub :: Sub -> Sub
-filterMarkedSub s = Map.map unmarkTerm $ Map.mapKeys (\(x:xs)-> xs) fs
-  where fs = Map.filterWithKey (\k v -> case k of
-                                          '_':xs -> True
-                                          _      -> False) s
+filterMarkedSub s = if Map.null ns
+                    then Map.map unmarkTerm $ Map.mapKeys (\(x:xs)-> xs) fs
+                    else filterMarkedSub $ Map.map (\a -> subTerm ns a) s
+  where sf ('_':xs) v = True
+        sf _ v = False
+        sf' ('_':xs) = True
+        sf' _ = False
+        fs = Map.filterWithKey sf s
+        var = filter (not . sf') $ Map.foldr (\a b -> (termVars a) ++ b) [] fs
+        ns = Map.filterWithKey (\a v -> a `elem` var) s
 
 --------------------------------------------------------
 -- PARSER
@@ -283,7 +295,7 @@ resolveAtoms e l = resolveAtoms' e l 0
           s0 <- resolveAtom env e i
           let exs' = subAtoms s0 exs
           case resolveAtoms env exs' of
-            Just s1 -> return $ Map.union s0 s1
+            Just s1 -> return $ subConcat s0 s1
             Nothing -> resolveAtoms' env l (i + 1)
 
 resolveAtom :: Env -> Atom -> Int -> Maybe Sub

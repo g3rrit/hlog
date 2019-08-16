@@ -19,4 +19,6 @@ eq(s(X), s(Y)) :-
          eq(X, Y).
 
 
-:- pow(s(s(z)), s(s(s(z))), X), sum(s(z), s(s(z)), Y).
+:- sum(s(s(z)), Y, s(s(s(z)))).
+
+# filtering should not filter subs when Value is Var
