@@ -9,7 +9,6 @@ mul(X, s(Y), Z) :-
         mul(X, Y, W),
         sum(W, X, Z).
 
-pow(z, z, s(z)).
 pow(X, z, s(z)).
 pow(X, s(Y), Z) :-
        pow(X, Y, W),
@@ -20,6 +19,20 @@ eq(s(X), s(Y)) :-
          eq(X, Y).
 
 
-:- mul(X, s(s(z)), s(s(s(s(z))))).
+<<<<<<< HEAD
+<<<<<<< HEAD
+:- mul(X, s(z), W), sum(X, W, s(s(z))).
+
+:- mul(X, s(s(z)), s(s(z))).
+
+end
+=======
+:- sum(s(s(z)), Y, s(s(s(z)))).
+>>>>>>> parent of b6d662a... # Update simplified concatination of substitution
+=======
+:- sum(s(s(z)), Y, s(s(s(z)))).
+>>>>>>> parent of b6d662a... # Update simplified concatination of substitution
 
 # filtering should not filter subs when Value is Var
+
+mul(X, s(z), W), sum(W, X, s(s(z)))

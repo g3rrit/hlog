@@ -305,22 +305,54 @@ resolveAtoms e l = resolveAtoms' e l 0
             Just s1 -> return $ subConcat s0 s1
             Nothing -> resolveAtoms' env l (i + 1)
 
+resolveAtoms env l@(e:exs) i n = do
+          s0 <- resolveAtom env e i
+          let exs' = subAtoms s0 exs
+          case resolveAtoms env exs' of
+            Just s1 -> if n == 0
+                       then return $ subConcat s0 s1
+                       else resolveAtoms
+            Nothing -> resolveAtoms' env l (i + 1)
+
+
+
 resolveAtom :: Env -> Atom -> Int -> Maybe Sub
 resolveAtom env a@(n, _) i = matchExps env a exps i
   where exps = envGet n env
 
 matchExps :: Env -> Atom -> [Exp] -> Int -> Maybe Sub
 matchExps _ _ [] _ = Nothing
-matchExps env a (e:es) i =
-  case matchExp env a' e of
+matchExps env a ((Fact (s', ss')):es) i =
+  case matchExp of
     Just r -> if i > 0
               then matchExps env a' es (i - 1)
               else Just $ filterMarkedSub r
     Nothing -> matchExps env a' es i
   where a' = markAtom a
+        (s, ss) = a'
+        matchExp = unifyTerms ss ss'
+
+matchExps env a ((Rule head@(s', ss') as):es) i =
+  case matchExp of
+    Just r -> if i > 0
+              then matchExps env a' es (i - 1)
+              else Just $ filterMarkedSub r
+    Nothing -> matchExps env a' es i
+  where a' = markAtom a
+        (s, ss) = a'
+        matchExp = do
+          mhs <- unifyTerms ss ss'
+          let sa = subAtoms mhs as
+          rs <- resolveAtoms env sa
+          let (s'', ss'') = subAtom rs head
+          unifyTerms ss ss''
+
+
+
+
 
 matchExp :: Env -> Atom -> Exp -> Maybe Sub
-matchExp env (s, ss) (Fact (s', ss')) = unifyTerms ss ss'
+matchExp env (s, ss) (Fact (s', ss')) =
 matchExp env (s, ss) (Rule head@(s', ss') as) = do
   mhs <- unifyTerms ss ss'
   let sa = subAtoms mhs as
