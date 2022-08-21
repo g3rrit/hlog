@@ -1,0 +1,17 @@
+
+sum(X, z, X).
+sum(X, s(Y), Z) :-
+       sum(s(X), Y, Z).
+
+mul(X, z, z).
+mul(X, s(Y), Z) :-
+        mul(X, Y, W),
+        sum(W, X, Z).
+
+pow(z, z, s(z)).
+pow(X, z, s(z)).
+pow(X, s(Y), Z) :-
+       pow(X, Y, W),
+       mul(W, X, Z).
+
+:- pow(s(s(z)), s(s(s(z))), X).

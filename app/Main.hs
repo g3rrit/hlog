@@ -2,13 +2,12 @@
 {-# LANGUAGE FlexibleInstances #-}
 
 import Text.Parsec
-import Text.ParserCombinators.Parsec hiding (try)
 import Control.Monad.State
 import Control.Monad.Except
-import Data.List
+import qualified Data.List
 import Data.Char
-import qualified Data.Map as Map hiding (show)
-import qualified Test.LeanCheck as Lc
+import System.Environment
+import qualified Data.Map as Map
 
 type HlogError = ExceptT String IO
 
@@ -34,47 +33,23 @@ instance Show Term where
   show (Var x) = x
   show (Fn n ts) = case l of
                      [] -> n
-                     (x:xs) -> n ++ "(" ++ (concat (intersperse ", " l)) ++ ")"
+                     _ -> n ++ "(" ++ (concat (Data.List.intersperse ", " l)) ++ ")"
     where l = map show ts
 
 
 showSub :: Sub -> String
 showSub a = "{ " ++ l'' ++ " }"
   where l = Map.toList a
-        l' = map (\(a, b) -> a ++ " -> " ++ (show b)) l
-        l'' = concat (intersperse ", " l')
-
---------------------------------------------------------
--- TEST
---------------------------------------------------------
-
-instance Lc.Listable Term where
-  tiers = Lc.cons1 Var
-          Lc.\/ Lc.cons2 Fn
-
-unifyTest :: Term -> Term -> Bool
-unifyTest t0 t1 = case unify t0 t1 of
-                    Just r -> True
-                    Nothing -> True
-
--- testEnv = MultiMap.fromList [ ("sum", Fact ("sum", [Var "X", Fn "z" [], Var  "X"])),
---                               ("sum", Rule ("sum", [Var "X",
-
+        l' = map (\(a', b) -> a' ++ " -> " ++ (show b)) l
+        l'' = concat (Data.List.intersperse ", " l')
 
 --------------------------------------------------------
 -- TERM
 --------------------------------------------------------
 
-termArity :: Term -> Int
-termArity (Fn _ xs) = length xs
-termArity _ = 0
-
 termVars :: Term -> [String]
 termVars (Var x) = [x]
 termVars (Fn _ xs) = xs >>= termVars
-
-compareArity :: Term -> Term -> Bool
-compareArity t0 t1 = (termArity t0) == (termArity t1)
 
 unify :: Term -> Term -> Maybe Sub
 unify (Var x) t1@(Var _) = Just $ Map.singleton x t1
@@ -89,8 +64,9 @@ unify (Fn n xs) (Fn p ys) = if n /= p
 unifyTerms :: [Term] -> [Term] -> Maybe Sub
 unifyTerms xs ys = unifyTerms' xs ys emptySub
 
+unifyTerms' :: [Term] -> [Term] -> Sub -> Maybe Sub
 unifyTerms' [] [] s = Just s
-unifyTerms' xs ys s =
+unifyTerms' xs ys _ =
   if not ln
   then Nothing
   else let (x:xs', y:ys') = (xs, ys) in do
@@ -305,69 +281,41 @@ resolveAtoms e l = resolveAtoms' e l 0
             Just s1 -> return $ subConcat s0 s1
             Nothing -> resolveAtoms' env l (i + 1)
 
-resolveAtoms env l@(e:exs) i n = do
-          s0 <- resolveAtom env e i
-          let exs' = subAtoms s0 exs
-          case resolveAtoms env exs' of
-            Just s1 -> if n == 0
-                       then return $ subConcat s0 s1
-                       else resolveAtoms
-            Nothing -> resolveAtoms' env l (i + 1)
-
-
-
 resolveAtom :: Env -> Atom -> Int -> Maybe Sub
 resolveAtom env a@(n, _) i = matchExps env a exps i
   where exps = envGet n env
 
 matchExps :: Env -> Atom -> [Exp] -> Int -> Maybe Sub
 matchExps _ _ [] _ = Nothing
-matchExps env a ((Fact (s', ss')):es) i =
-  case matchExp of
+matchExps env a (e:es) i =
+  case matchExp env a' e of
     Just r -> if i > 0
               then matchExps env a' es (i - 1)
               else Just $ filterMarkedSub r
     Nothing -> matchExps env a' es i
   where a' = markAtom a
-        (s, ss) = a'
-        matchExp = unifyTerms ss ss'
-
-matchExps env a ((Rule head@(s', ss') as):es) i =
-  case matchExp of
-    Just r -> if i > 0
-              then matchExps env a' es (i - 1)
-              else Just $ filterMarkedSub r
-    Nothing -> matchExps env a' es i
-  where a' = markAtom a
-        (s, ss) = a'
-        matchExp = do
-          mhs <- unifyTerms ss ss'
-          let sa = subAtoms mhs as
-          rs <- resolveAtoms env sa
-          let (s'', ss'') = subAtom rs head
-          unifyTerms ss ss''
-
-
-
-
 
 matchExp :: Env -> Atom -> Exp -> Maybe Sub
-matchExp env (s, ss) (Fact (s', ss')) =
-matchExp env (s, ss) (Rule head@(s', ss') as) = do
+matchExp env (s, ss) (Fact (_, ss')) = unifyTerms ss ss'
+matchExp env (_, ss) (Rule headr@(_, ss') as) = do
   mhs <- unifyTerms ss ss'
   let sa = subAtoms mhs as
   rs <- resolveAtoms env sa
-  let (s'', ss'') = subAtom rs head
+  let (_, ss'') = subAtom rs headr
   unifyTerms ss ss''
 
 --------------------------------------------------------
 -- MAIN
 --------------------------------------------------------
 
+main :: IO ()
 main = do
-  let fpath = "test.txt"
+  args <- getArgs
+  let path = case args of
+              x : _ -> x
+              _ -> error "No input file specified"
   putStrLn "----- Hlog ------"
-  source <- readFile fpath
+  source <- readFile path
   putStrLn $ "Parsing Source:\n" ++ source
   putStrLn "---------------"
 
